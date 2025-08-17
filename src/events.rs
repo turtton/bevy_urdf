@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use bevy::prelude::*;
@@ -178,8 +179,8 @@ pub(crate) fn handle_spawn_robot(
 
                 if event.robot_type == RobotType::Uuv && uuv_descriptor.is_none() {
                     let urdf_asset = urdf_assets.get(&event.handle).unwrap();
-                    let thrusters =
-                        try_extract_uuv_thruster_positions(&urdf_asset.xml_string).unwrap_or_default();
+                    let thrusters = try_extract_uuv_thruster_positions(&urdf_asset.xml_string)
+                        .unwrap_or_default();
                     uuv_descriptor = Some(UuvDescriptor {
                         thruster_positions: thrusters,
                         ..default()
@@ -203,6 +204,12 @@ pub(crate) fn handle_spawn_robot(
             let rapier_handles = maybe_rapier_handles.unwrap();
             let body_handles: Vec<RigidBodyHandle> =
                 rapier_handles.links.iter().map(|link| link.body).collect();
+            let robot_materials = &urdf
+                .robot
+                .materials
+                .iter()
+                .map(|material| (material.name.clone(), material))
+                .collect::<HashMap<_, _>>();
             let geoms = extract_robot_geometry(urdf);
 
             assert_eq!(body_handles.len(), geoms.len());
@@ -237,23 +244,27 @@ pub(crate) fn handle_spawn_robot(
                         continue;
                     }
 
-                    let mesh_3d: Mesh3d = match geom.unwrap() {
-                        urdf_rs::Geometry::Box { size } => Mesh3d(meshes.add(Cuboid::new(
-                            size[0] as f32 * 2.0,
-                            size[2] as f32 * 2.0,
-                            size[1] as f32 * 2.0,
-                        ))),
+                    let (geom, material) = geom.unwrap();
+                    let (mesh_3d, scale) = match geom {
+                        urdf_rs::Geometry::Box { size } => (
+                            Mesh3d(meshes.add(Cuboid::new(
+                                size[0] as f32 * 2.0,
+                                size[2] as f32 * 2.0,
+                                size[1] as f32 * 2.0,
+                            ))),
+                            None,
+                        ),
                         urdf_rs::Geometry::Cylinder { .. } => todo!(),
                         urdf_rs::Geometry::Capsule { .. } => todo!(),
                         urdf_rs::Geometry::Sphere { radius } => {
-                            Mesh3d(meshes.add(Sphere::new(radius as f32)))
+                            (Mesh3d(meshes.add(Sphere::new(radius as f32))), None)
                         }
-                        urdf_rs::Geometry::Mesh { filename, .. } => {
+                        urdf_rs::Geometry::Mesh { filename, scale } => {
                             let base_path = event.mesh_dir.as_str();
                             let model_path = Path::new(base_path).join(filename);
                             let model_path = model_path.to_str().unwrap();
 
-                            Mesh3d(asset_server.load(model_path))
+                            (Mesh3d(asset_server.load(model_path)), scale)
                         }
                     };
 
@@ -278,9 +289,37 @@ pub(crate) fn handle_spawn_robot(
                     );
                     let bevy_vec = quat_fix.mul_vec3(rapier_vec);
 
+                    let color = match material {
+                        Some(urdf_rs::Material {
+                            color:
+                                Some(urdf_rs::Color {
+                                    rgba: urdf_rs::Vec4(rgba),
+                                }),
+                            ..
+                        }) => Color::srgba(
+                            rgba[0] as f32,
+                            rgba[1] as f32,
+                            rgba[2] as f32,
+                            rgba[3] as f32,
+                        ),
+                        Some(urdf_rs::Material { name, .. }) => robot_materials
+                            .get(&name)
+                            .and_then(|material| {
+                                material.color.clone().map(|color| {
+                                    Color::srgba(
+                                        color.rgba.0[0] as f32,
+                                        color.rgba.0[1] as f32,
+                                        color.rgba.0[2] as f32,
+                                        color.rgba.0[3] as f32,
+                                    )
+                                })
+                            })
+                            .unwrap_or_else(|| Color::srgb(0.2, 0.8, 0.2)),
+                        _ => Color::srgb(0.2, 0.8, 0.2),
+                    };
                     let mut ec = children.spawn((
                         mesh_3d,
-                        MeshMaterial3d(materials.add(Color::srgb(0.2, 0.8, 0.2))),
+                        MeshMaterial3d(materials.add(color)),
                         URDFRobotRigidBodyHandle(body_handles[index]),
                         RapierContextEntityLink(rapier_context_simulation_entity),
                     ));
@@ -301,7 +340,7 @@ pub(crate) fn handle_spawn_robot(
                                 adp.km,
                             );
 
-                            let transform = if let Some(visual_rotor_position) =
+                            let mut transform = if let Some(visual_rotor_position) =
                                 vbp.rotor_positions.get(rotor_index)
                             {
                                 Transform::from_translation(*visual_rotor_position)
@@ -309,10 +348,17 @@ pub(crate) fn handle_spawn_robot(
                             } else {
                                 Transform::from_translation(bevy_vec).with_rotation(bevy_quat)
                             };
+                            if let Some(scale) = scale {
+                                transform = transform.with_scale(Vec3::new(
+                                    scale[0] as f32,
+                                    scale[1] as f32,
+                                    scale[2] as f32,
+                                ));
+                            }
 
                             ec.insert(DroneRotor {
                                 state: rotor_state,
-                                transform: transform,
+                                transform,
                                 rotor_index,
                             });
                             rotor_index += 1;
@@ -320,14 +366,21 @@ pub(crate) fn handle_spawn_robot(
                             ec.insert(transform);
                         }
                     } else {
-                        let transform =
+                        let mut transform =
                             Transform::from_translation(bevy_vec).with_rotation(bevy_quat);
+                        if let Some(scale) = scale {
+                            transform = transform.with_scale(Vec3::new(
+                                scale[0] as f32,
+                                scale[1] as f32,
+                                scale[2] as f32,
+                            ));
+                        }
                         ec.insert(transform);
                     }
 
                     // insert entity id to collider data, otherwise it breaks in debug mode
                     let entity_id = ec.id().index();
-                for (_entity, mut rigid_body_set, mut collider_set, _) in
+                    for (_entity, mut rigid_body_set, mut collider_set, _) in
                         q_rapier_context.iter_mut()
                     {
                         if let Some(rigid_body) = rigid_body_set.bodies.get_mut(body_handles[index])
@@ -346,7 +399,9 @@ pub(crate) fn handle_spawn_robot(
                     if let Some(desc) = uuv_descriptor.clone() {
                         for (thruster_index, pos) in desc.thruster_positions.iter().enumerate() {
                             children.spawn((
-                                Thruster { index: thruster_index },
+                                Thruster {
+                                    index: thruster_index,
+                                },
                                 Transform::from_translation(*pos),
                             ));
                         }

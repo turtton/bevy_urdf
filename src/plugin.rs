@@ -175,14 +175,14 @@ pub fn extract_robot_geometry(
     robot: &UrdfAsset,
 ) -> Vec<(
     usize,
-    Option<Geometry>,
+    Option<(Geometry, Option<urdf_rs::Material>)>,
     Pose,
     Option<Pose>,
     Option<Collider>,
 )> {
     let mut result: Vec<(
         usize,
-        Option<Geometry>,
+        Option<(Geometry, Option<urdf_rs::Material>)>,
         Pose,
         Option<Pose>,
         Option<Collider>,
@@ -197,7 +197,8 @@ pub fn extract_robot_geometry(
         };
 
         let geometry = if !link.visual.is_empty() {
-            Some(link.visual[0].geometry.clone())
+            let visual = &link.visual[0];
+            Some((visual.geometry.clone(), visual.material.clone()))
         } else {
             None
         };
@@ -242,7 +243,10 @@ fn sync_robot_geometry(
                 );
 
                 let bevy_vec = quat_fix.mul_vec3(rapier_vec);
-                let body_transform = Transform::from_translation(bevy_vec).with_rotation(bevy_quat);
+                let original_scale = transform.scale;
+                let body_transform = Transform::from_translation(bevy_vec)
+                    .with_rotation(bevy_quat)
+                    .with_scale(original_scale);
 
                 *transform = body_transform;
             }
