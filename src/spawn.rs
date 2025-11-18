@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use nalgebra::UnitQuaternion;
-use rapier3d::prelude::{InteractionGroups, MultibodyJointHandle, Real, RigidBodyHandle, Vector};
+use rapier3d::prelude::{InteractionGroups, MultibodyJointHandle, RigidBodyHandle};
 use rapier3d_urdf::{UrdfMultibodyOptions, UrdfRobot, UrdfRobotHandles};
 use uav::dynamics::RotorState;
 
@@ -125,43 +125,6 @@ fn try_create_uuv_descriptor(
     }
 }
 
-fn apply_child_anchor_overrides(urdf_robot: &mut UrdfRobot, robot: &urdf_rs::Robot) {
-    for (joint_index, joint_def) in robot.joints.iter().enumerate() {
-        let Some(rapier_joint) = urdf_robot.joints.get_mut(joint_index) else {
-            continue;
-        };
-
-        let mut frame2 = rapier_joint.joint.local_frame2;
-        let desired_translation = Vector::new(
-            joint_def.origin.xyz.0[0] as Real,
-            joint_def.origin.xyz.0[1] as Real,
-            joint_def.origin.xyz.0[2] as Real,
-        );
-
-        let delta = frame2.translation.vector - desired_translation;
-        if delta.norm() <= 1.0e-6 {
-            continue;
-        }
-
-        if cfg!(debug_assertions) {
-            let current = frame2.translation.vector;
-            debug!(
-                "Aligning joint child anchor '{}': frame2 {:?} → {:?}",
-                joint_def.name,
-                Vec3::new(current.x as f32, current.y as f32, current.z as f32),
-                Vec3::new(
-                    desired_translation.x as f32,
-                    desired_translation.y as f32,
-                    desired_translation.z as f32
-                )
-            );
-        }
-
-        frame2.translation.vector = desired_translation.into();
-        rapier_joint.joint.set_local_frame2(frame2);
-    }
-}
-
 fn initialize_rapier_handles(
     urdf_robot: UrdfRobot,
     q_rapier_context: &mut Query<(
@@ -171,8 +134,8 @@ fn initialize_rapier_handles(
         &mut RapierContextJoints,
     )>,
 ) -> UrdfRobotHandles<Option<MultibodyJointHandle>> {
-    if let Some((_entity, mut rigid_body_set, mut collider_set, mut multibidy_joint_set)) =
-        q_rapier_context.iter_mut().next()
+    for (_entity, mut rigid_body_set, mut collider_set, mut multibidy_joint_set) in
+        q_rapier_context.iter_mut()
     {
         return urdf_robot.insert_using_multibody_joints(
             &mut rigid_body_set.bodies,
@@ -207,7 +170,8 @@ fn create_mesh_from_geometry(
         urdf_rs::Geometry::Mesh { filename, scale } => {
             let model_path = Path::new(mesh_dir).join(filename);
             let model_path = model_path.to_str().unwrap();
-            let scale = (*scale).map(|vec| Vec3::new(vec[0] as f32, vec[1] as f32, vec[2] as f32));
+            let scale = (*scale)
+                .map(|vec| Vec3::new(vec[0] as f32, vec[1] as f32, vec[2] as f32));
             (Mesh3d(asset_server.load(model_path)), scale)
         }
     }
@@ -245,7 +209,7 @@ fn calculate_transform_from_pose(
     ]);
 
     rapier_body_translation += bevy_rapier_body_rotation * pose_translation;
-    rapier_body_rotation *= pose_rotation;
+    rapier_body_rotation = rapier_body_rotation * pose_rotation;
 
     let bevy_translation = rapier_to_bevy_rotation().mul_vec3(rapier_body_translation);
     let bevy_rotation = rapier_to_bevy_rotation()
@@ -371,7 +335,7 @@ fn spawn_robot_geometries(
 ) {
     let mut rotor_index = 0;
 
-    for extracted_geometry in extracted_geometries.iter() {
+    for (_eg_index, extracted_geometry) in extracted_geometries.iter().enumerate() {
         let index = extracted_geometry.index;
 
         for (geom_index, geom) in extracted_geometry.geometries.iter().enumerate() {
@@ -462,11 +426,9 @@ pub(crate) fn handle_spawn_robot(
             );
 
             // Initialize rapier handles
-            let mut urdf_robot_instance = urdf_asset.urdf_robot.clone();
-            apply_child_anchor_overrides(&mut urdf_robot_instance, &urdf_asset.robot);
 
             let rapier_handles =
-                initialize_rapier_handles(urdf_robot_instance, &mut q_rapier_context);
+                initialize_rapier_handles(urdf_asset.urdf_robot.clone(), &mut q_rapier_context);
             let body_handles: Vec<RigidBodyHandle> =
                 rapier_handles.links.iter().map(|link| link.body).collect();
 
