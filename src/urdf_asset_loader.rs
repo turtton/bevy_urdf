@@ -22,6 +22,7 @@ pub struct UrdfAsset {
     pub xml_string: String,
     pub isometry: nalgebra::Isometry<f32, nalgebra::Unit<nalgebra::Quaternion<f32>>, 3>,
     pub kinematic_transforms: HashMap<String, LinkTransform>,
+    pub loader_settings: RpyAssetLoaderSettings,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, Serialize)]
@@ -113,7 +114,7 @@ impl AssetLoader for RpyAssetLoader {
         }
 
         // fix joint positions
-        let kinematic_isometry = isometry.clone();
+        let kinematic_isometry = isometry;
         let kinematic_transforms = get_link_transforms(&mut robot, kinematic_isometry).unwrap();
 
         let mut urdf_robot = UrdfRobot::from_robot(
@@ -137,8 +138,9 @@ impl AssetLoader for RpyAssetLoader {
             robot,
             urdf_robot,
             xml_string: String::from(content),
-            isometry: isometry,
+            isometry,
             kinematic_transforms,
+            loader_settings: settings.clone(),
         })
     }
 }

@@ -170,8 +170,7 @@ fn create_mesh_from_geometry(
         urdf_rs::Geometry::Mesh { filename, scale } => {
             let model_path = Path::new(mesh_dir).join(filename);
             let model_path = model_path.to_str().unwrap();
-            let scale = (*scale)
-                .map(|vec| Vec3::new(vec[0] as f32, vec[1] as f32, vec[2] as f32));
+            let scale = (*scale).map(|vec| Vec3::new(vec[0] as f32, vec[1] as f32, vec[2] as f32));
             (Mesh3d(asset_server.load(model_path)), scale)
         }
     }
@@ -337,6 +336,31 @@ fn spawn_robot_geometries(
 
     for (_eg_index, extracted_geometry) in extracted_geometries.iter().enumerate() {
         let index = extracted_geometry.index;
+
+        if extracted_geometry.geometries.is_empty() {
+            if let Some(link_transform) = kinematic_transforms.get(&extracted_geometry.link.name) {
+                let default_pose = urdf_rs::Pose::default();
+                let (bevy_translation, bevy_rotation) =
+                    calculate_transform_from_pose(link_transform, &default_pose);
+
+                let transform =
+                    Transform::from_translation(bevy_translation).with_rotation(bevy_rotation);
+
+                let ec = children.spawn((
+                    URDFRobotRigidBodyHandle {
+                        rigid_body_handle: body_handles[index],
+                        visual_pose: default_pose,
+                    },
+                    RapierContextEntityLink(rapier_context_simulation_entity),
+                    transform,
+                    Name::new(format!("{} (no visual)", extracted_geometry.link.name)),
+                ));
+
+                let entity_id = ec.id().index();
+                update_collider_user_data(entity_id, body_handles[index], q_rapier_context);
+            }
+            continue;
+        }
 
         for (geom_index, geom) in extracted_geometry.geometries.iter().enumerate() {
             let (mesh_3d, scale) =
