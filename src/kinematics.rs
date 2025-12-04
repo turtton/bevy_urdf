@@ -39,7 +39,7 @@ pub fn get_link_transforms(
     let mut transforms = HashMap::new();
 
     // Get transform for each link
-    for (_i, link) in robot.iter().enumerate() {
+    for link in robot.iter() {
         let world_transform = link.world_transform().unwrap();
         let link_name = &link.link().clone().unwrap().name;
 
