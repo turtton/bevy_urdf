@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::Path};
 use bevy::prelude::*;
 use bevy_rapier3d::prelude::*;
 use nalgebra::UnitQuaternion;
-use rapier3d::prelude::{InteractionGroups, MultibodyJointHandle, RigidBodyHandle};
+use rapier3d::prelude::{InteractionGroups, MultibodyJointHandle, Real, RigidBodyHandle, Vector};
 use rapier3d_urdf::{UrdfMultibodyOptions, UrdfRobot, UrdfRobotHandles};
 use uav::dynamics::RotorState;
 
@@ -122,6 +122,45 @@ fn try_create_uuv_descriptor(
         })
     } else {
         drone_descriptor
+    }
+}
+
+/// Align Rapier child anchors (local_frame2) with URDF joint origins.
+/// This ensures physical joints match the URDF-defined coordinate frames.
+fn apply_child_anchor_overrides(urdf_robot: &mut UrdfRobot, robot: &urdf_rs::Robot) {
+    for (joint_index, joint_def) in robot.joints.iter().enumerate() {
+        let Some(rapier_joint) = urdf_robot.joints.get_mut(joint_index) else {
+            continue;
+        };
+
+        let mut frame2 = rapier_joint.joint.local_frame2;
+        let desired_translation = Vector::new(
+            joint_def.origin.xyz.0[0] as Real,
+            joint_def.origin.xyz.0[1] as Real,
+            joint_def.origin.xyz.0[2] as Real,
+        );
+
+        let delta = frame2.translation.vector - desired_translation;
+        if delta.norm() <= 1.0e-6 {
+            continue;
+        }
+
+        if cfg!(debug_assertions) {
+            let current = frame2.translation.vector;
+            debug!(
+                "Aligning joint child anchor '{}': frame2 {:?} → {:?}",
+                joint_def.name,
+                Vec3::new(current.x as f32, current.y as f32, current.z as f32),
+                Vec3::new(
+                    desired_translation.x as f32,
+                    desired_translation.y as f32,
+                    desired_translation.z as f32
+                )
+            );
+        }
+
+        frame2.translation.vector = desired_translation.into();
+        rapier_joint.joint.set_local_frame2(frame2);
     }
 }
 
@@ -449,10 +488,12 @@ pub(crate) fn handle_spawn_robot(
                 urdf_asset,
             );
 
-            // Initialize rapier handles
+            // Initialize rapier handles with child anchor overrides
+            let mut urdf_robot_instance = urdf_asset.urdf_robot.clone();
+            apply_child_anchor_overrides(&mut urdf_robot_instance, &urdf_asset.robot);
 
             let rapier_handles =
-                initialize_rapier_handles(urdf_asset.urdf_robot.clone(), &mut q_rapier_context);
+                initialize_rapier_handles(urdf_robot_instance, &mut q_rapier_context);
             let body_handles: Vec<RigidBodyHandle> =
                 rapier_handles.links.iter().map(|link| link.body).collect();
 
