@@ -259,7 +259,7 @@ fn setup_drone_rotor(
 }
 
 fn update_collider_user_data(
-    entity_id: u32,
+    entity_bits: u64,
     body_handle: RigidBodyHandle,
     q_rapier_context: &mut Query<(
         Entity,
@@ -273,7 +273,7 @@ fn update_collider_user_data(
             let collider_handles = rigid_body.colliders();
             for collider_handle in collider_handles.iter() {
                 let collider = collider_set.colliders.get_mut(*collider_handle).unwrap();
-                collider.user_data = entity_id as u128;
+                collider.user_data = entity_bits as u128;
             }
         }
     }
@@ -356,8 +356,8 @@ fn spawn_robot_geometries(
                     Name::new(format!("{} (no visual)", extracted_geometry.link.name)),
                 ));
 
-                let entity_id = ec.id().index();
-                update_collider_user_data(entity_id, body_handles[index], q_rapier_context);
+                let entity_bits = ec.id().to_bits();
+                update_collider_user_data(entity_bits, body_handles[index], q_rapier_context);
             }
             continue;
         }
@@ -406,8 +406,8 @@ fn spawn_robot_geometries(
                         ec.insert(transform);
                     }
 
-                    let entity_id = ec.id().index();
-                    update_collider_user_data(entity_id, body_handles[index], q_rapier_context);
+                    let entity_bits = ec.id().to_bits();
+                    update_collider_user_data(entity_bits, body_handles[index], q_rapier_context);
                 }
             }
         }
