@@ -96,23 +96,6 @@ impl AssetLoader for RpyAssetLoader {
         }
         urdf_robot.joints = robot_joints.clone();
 
-        // apply custom collision groups
-        if let Some(mut adjusted_interaction_groups) = settings.interaction_groups {
-            let mut robot_links = urdf_robot.links.clone();
-            for (body_index, urdf_link) in robot_links.clone().iter().enumerate() {
-                for (collider_index, collider) in urdf_link.colliders.clone().iter().enumerate() {
-                    let mut collider = collider.clone();
-                    let urdf_interactions_groups = collider.collision_groups();
-
-                    adjusted_interaction_groups.filter = urdf_interactions_groups.filter;
-
-                    collider.set_collision_groups(adjusted_interaction_groups);
-                    robot_links[body_index].colliders[collider_index] = collider;
-                }
-            }
-            urdf_robot.links = robot_links;
-        }
-
         // fix joint positions
         let kinematic_isometry = isometry;
         let kinematic_transforms = get_link_transforms(&mut robot, kinematic_isometry).unwrap();
@@ -133,6 +116,19 @@ impl AssetLoader for RpyAssetLoader {
         );
 
         urdf_robot.joints = robot_joints.clone();
+
+        // apply custom collision groups (must be after from_robot() to avoid being overwritten)
+        if let Some(interaction_groups) = settings.interaction_groups {
+            let mut robot_links = urdf_robot.links.clone();
+            for (body_index, urdf_link) in robot_links.clone().iter().enumerate() {
+                for (collider_index, collider) in urdf_link.colliders.clone().iter().enumerate() {
+                    let mut collider = collider.clone();
+                    collider.set_collision_groups(interaction_groups);
+                    robot_links[body_index].colliders[collider_index] = collider;
+                }
+            }
+            urdf_robot.links = robot_links;
+        }
 
         Ok(UrdfAsset {
             robot,
