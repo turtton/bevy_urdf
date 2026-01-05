@@ -11,6 +11,7 @@ use thiserror::Error;
 use urdf_rs::Robot;
 
 use crate::kinematics::{get_link_transforms, LinkTransform};
+use crate::to_filesystem_path;
 
 #[derive(Default)]
 pub struct RpyAssetLoader;
@@ -80,6 +81,7 @@ impl AssetLoader for RpyAssetLoader {
         };
 
         let mesh_dir = settings.clone().mesh_dir.unwrap_or("./".to_string());
+        let mesh_dir = to_filesystem_path(&mesh_dir);
         let mesh_dir = Path::new(&mesh_dir);
 
         let (mut urdf_robot, mut robot) =

@@ -13,6 +13,7 @@ use crate::{
         extract_robot_geometry, rapier_to_bevy_rotation, ExtractedGeometry, URDFRobot,
         URDFRobotRigidBodyHandle,
     },
+    to_asset_path,
     uav::{
         try_extract_drone_aerodynamic_props, try_extract_drone_visual_and_dynamic_model_props,
         DroneRotor, UAVDescriptor,
@@ -598,9 +599,11 @@ pub(crate) fn handle_load_robot(
                 }
             });
 
+        let mesh_dir = to_asset_path(&event.mesh_dir);
+
         ew_robot_loaded.write(RobotLoaded {
             handle: robot_handle,
-            mesh_dir: event.mesh_dir.clone().replace("assets/", ""),
+            mesh_dir,
             marker: event.marker,
             robot_type: event.robot_type,
             uav_descriptor: event.uav_descriptor.clone(),
