@@ -16,11 +16,20 @@ pub fn has_bevy_asset_root() -> bool {
 
 /// Converts Bevy asset path to filesystem path (for collider generation)
 ///
-/// When BEVY_ASSET_ROOT is set, adds `assets/` prefix if not present.
-/// This is required because rapier3d_urdf expects actual filesystem paths.
+/// When BEVY_ASSET_ROOT is set, constructs an absolute path using BEVY_ASSET_ROOT.
+/// This is required because rapier3d_urdf expects actual filesystem paths,
+/// and the working directory may differ from BEVY_ASSET_ROOT (e.g., in Docker).
 pub fn to_filesystem_path(mesh_dir: &str) -> String {
-    if has_bevy_asset_root() && !mesh_dir.starts_with("assets/") {
-        format!("assets/{}", mesh_dir)
+    if let Ok(asset_root) = std::env::var("BEVY_ASSET_ROOT") {
+        let base = std::path::Path::new(&asset_root);
+        if mesh_dir.starts_with("assets/") {
+            base.join(mesh_dir).to_string_lossy().into_owned()
+        } else {
+            base.join("assets")
+                .join(mesh_dir)
+                .to_string_lossy()
+                .into_owned()
+        }
     } else {
         mesh_dir.to_string()
     }
